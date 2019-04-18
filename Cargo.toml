@@ -1,0 +1,15 @@
+[package]
+name = "threadpools"
+version = "0.1.0"
+authors = ["aevans <aevans48@simplrsinsites.com>"]
+edition = "2018"
+
+[dependencies]
+vault_client="^0.3.2"
+md5="^0.6.1"
+time = "^0.1.42"
+tokio = "^0.1.18"
+tokio-threadpool = "0.1.13"
+futures = "0.1.26"
+crossbeam = "^0.7.1"
+serde = "^1.0.90"
