@@ -49,8 +49,8 @@ impl ReceiveTask for Stealer {
 struct ThreadPool {
     num_threads: usize,
     threads: Vec<JoinHandle<()>>,
-    workers: Vec<Sender<Stealer>>,
-    backend: Receiver<ReceiveTask>,
+    workers: Vec<Sender<i64>>,
+    backend: Receiver<i64>,
 }
 
 
@@ -68,7 +68,7 @@ impl ThreadPool {
         assert!(size > 0);
 
         let mut thread_vec: Vec<JoinHandle<()>> = Vec::with_capacity(size);
-        let worker_queues: Vec<Sender<Stealer>> = Vec::with_capacity(size);
+        let worker_queues: Vec<Sender<i64>> = Vec::with_capacity(size);
         let (backend_sender, backend_results): (Sender<i64>, Receiver<i64>) = mpsc::channel();
 
         for i in 0..size{
@@ -91,7 +91,7 @@ impl ThreadPool {
             num_threads: size,
             threads: thread_vec,
             workers: worker_queues,
-            //backend: backend_results,
+            backend: backend_results,
         }
     }
 }
