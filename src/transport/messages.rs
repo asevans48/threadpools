@@ -12,11 +12,6 @@ pub struct Steal {
     pub thread_id: usize,
 }
 
-
-/// Terminate
-pub struct Terminate {}
-
-
 ///Termination signal
 pub struct Terminated {
     pub thread_id: usize,
