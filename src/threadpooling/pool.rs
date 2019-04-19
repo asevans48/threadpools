@@ -68,8 +68,6 @@ mod tests {
     #[test]
     fn test_should_create_pool(){
         let mut pool = ThreadPool::new(10);
-        let test = Tester{};
-        let test_box = Box::new(test);
     }
 
     #[test]
