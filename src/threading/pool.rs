@@ -3,46 +3,7 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-
-
-///Sender for sending tasks to a worker
-trait SendTask {
-    fn new() -> Self;
-}
-
-
-/// Task received by the prodcuer
-trait ReceiveTask {
-    fn run();
-    fn new(id: i64) -> Self;
-}
-
-
-/// A stealer for attempting to steal work
-struct Stealer {
-    thread_id: i64,
-}
-
-
-impl Stealer {
-    fn get_thread_id(&self) -> i64 {
-        self.thread_id
-    }
-}
-
-
-impl ReceiveTask for Stealer {
-
-    fn run() {
-
-    }
-
-    fn new(id: i64) -> Stealer {
-        Stealer{
-            thread_id: id,
-        }
-    }
-}
+use std::any::Any;
 
 
 /// Threadpool structure for accessing information
@@ -101,10 +62,15 @@ impl ThreadPool {
 mod tests {
 
     use super::*;
-    use futures::future::lazy;
+
+
+    struct Tester {}
+
 
     #[test]
     fn test_pool_create(){
         let mut pool = ThreadPool::new(10);
+        let test = Tester{};
+        let test_box = Box::new(test);
     }
 }
