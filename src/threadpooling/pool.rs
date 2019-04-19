@@ -41,16 +41,16 @@ impl ThreadPool {
         let (sx, rx): (Sender<ReturnValue>, Receiver<ReturnValue>) = mpsc::channel();
 
         for i in 0..size {
-            /*
             let (wsx, wrx): (Sender<thunk::Thunk>, Receiver<thunk::Thunk>) = mpsc::channel();
             workers.push(wsx);
             let thread_receiver = Arc::new(Mutex::new(wrx));
             let thread_sx = sx.clone();
+            let thread_rx = thread_receiver.clone();
             let tid = i.clone();
             let handler = thread::spawn(move || {
                 let mut run : bool = true;
                 while run {
-                    let data = thread_receiver.lock().unwrap().recv();
+                    let data = thread_rx.lock().unwrap().recv();
                     if data.is_ok(){
                         data.unwrap().call_box();
                     } else {
@@ -65,7 +65,6 @@ impl ThreadPool {
             });
             threads.push(handler);
             stealers.push(thread_receiver);
-            */
         }
     }
 }

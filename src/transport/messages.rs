@@ -2,14 +2,14 @@
 
 ///Message type for general return values
 pub struct Message {
-    thread_id: usize,
-    msg: String,
+    pub thread_id: usize,
+    pub msg: String,
 }
 
 
 ///Steal instruction, should cause work stealing
 pub struct Steal {
-    thread_id: usize,
+    pub thread_id: usize,
 }
 
 
@@ -19,7 +19,7 @@ pub struct Terminate {}
 
 ///Termination signal
 pub struct Terminated {
-    thread_id: usize,
+    pub thread_id: usize,
 }
 
 
