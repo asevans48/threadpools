@@ -3,20 +3,22 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use crate::transport::thunk;
+use crate::transport::{return_value, thunk};
+
 
 /// Threadpool structure for accessing information
 struct ThreadPool {
     num_threads: usize,
     threads: Vec<JoinHandle<()>>,
     workers: Vec<Sender<thunk::Thunk>>,
-    backend: Receiver<i64>,
+    backend: Receiver<return_value::ReturnValue>,
 }
 
 
+/// Thread pool implementation
 impl ThreadPool {
 
-    fn submit<F>(&self, f: F, args: String) {
+    fn submit(&self, thunk: thunk::Thunk, args: String) {
 
     }
 
@@ -29,10 +31,10 @@ impl ThreadPool {
 
         let mut thread_vec: Vec<JoinHandle<()>> = Vec::with_capacity(size);
         let worker_queues: Vec<Sender<thunk::Thunk>> = Vec::with_capacity(size);
-        let (backend_sender, backend_results): (Sender<i64>, Receiver<i64>) = mpsc::channel();
+        let (backend_sender, backend_results): (Sender<return_value::ReturnValue>, Receiver<return_value::ReturnValue>) = mpsc::channel();
 
         for i in 0..size{
-            let (work_sender, work_queue): (Sender<i64>, Receiver<i64>) = mpsc::channel();
+            let (work_sender, work_queue): (Sender<thunk::Thunk>, Receiver<thunk::Thunk>) = mpsc::channel();
             let safe_queue = Arc::new(Mutex::new(work_queue));
             let arc = safe_queue.clone();
             let thread_sender = backend_sender.clone();
@@ -63,13 +65,20 @@ mod tests {
     use super::*;
 
 
-    struct Tester {}
-
-
     #[test]
-    fn test_pool_create(){
+    fn test_should_create_pool(){
         let mut pool = ThreadPool::new(10);
         let test = Tester{};
         let test_box = Box::new(test);
+    }
+
+    #[test]
+    fn test_should_perform_work(){
+
+    }
+
+    #[test]
+    fn test_should_perform_large_amounts_of_work(){
+
     }
 }

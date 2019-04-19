@@ -4,7 +4,7 @@
 use std::thread::{self, Thread};
 
 
-trait FnBox {
+pub trait FnBox {
     fn call_box(self: Box<Self>);
 }
 
@@ -16,7 +16,7 @@ impl <F: FnOnce()> FnBox for F {
 }
 
 
-pub type Thunk = Box<dyn FnBox + Send + 'static>;
+pub type Thunk = Box<dyn FnBox + Send>;
 
 
 #[cfg(test)]
