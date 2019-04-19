@@ -37,7 +37,8 @@ mod tests {
 
     #[test]
     fn test_exec_func_in_thunk() {
-        let f: Thunk = Box::new(|| execute(true));
+        let b : bool = true;
+        let f: Thunk = Box::new(move|| execute(b));
         f.call_box();
     }
 

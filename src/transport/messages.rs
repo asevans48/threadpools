@@ -1,49 +1,25 @@
-/// Messages for transporting return values
-
-
-trait TypeInfo {
-    fn type_of(&self) -> &'static str;
-}
-
+/// General messages
 
 ///Message type for general return values
-struct Message {
-    thread_id: i32,
+pub struct Message {
+    thread_id: usize,
     msg: String,
 }
 
 
-impl TypeInfo for Message {
-    fn type_of(&self) -> &'static str {
-        "Message"
-    }
-}
-
-
-
 ///Steal instruction, should cause work stealing
-struct Steal{
-    thread_id: i32,
+pub struct Steal {
+    thread_id: usize,
 }
 
 
-impl TypeInfo for Steal {
-    fn type_of(&self) -> &'static str {
-        "stealer"
-    }
-}
+/// Terminate
+pub struct Terminate {}
 
 
 ///Termination signal
-struct Terminated {
-    thread_id: i32,
-}
-
-
-impl TypeInfo for Terminated {
-    fn type_of(&self) -> &'static str {
-        "terminated"
-    }
+pub struct Terminated {
+    thread_id: usize,
 }
 
 
