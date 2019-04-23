@@ -1,4 +1,6 @@
 /// General messages
+use std::any::Any;
+
 
 ///Message type for general return values
 pub struct Message {
@@ -12,10 +14,19 @@ pub struct Steal {
     pub thread_id: usize,
 }
 
+
 ///Termination signal
 pub struct Terminated {
     pub thread_id: usize,
 }
+
+
+pub struct Terminate{
+
+}
+
+
+pub type Signal = Box<Any + Send>;
 
 
 #[cfg(test)]
@@ -41,6 +52,7 @@ mod tests {
         let steal = Steal {
             thread_id: 1,
         };
+
         let rval: return_value::ReturnValue = Box::new(steal);
         let rva: &Any = (rval.as_ref()) as &dyn Any;
         if let Some(rval) = rva.downcast_ref::<Steal>() {
