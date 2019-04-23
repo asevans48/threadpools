@@ -5,7 +5,4 @@ authors = ["aevans <aevans48@simplrsinsites.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = "^0.1.18"
-tokio-threadpool = "0.1.13"
-crossbeam = "^0.7.1"
 num_cpus = "0.2"

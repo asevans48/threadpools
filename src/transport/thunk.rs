@@ -1,8 +1,6 @@
 /// A thunk capable of sharing routines between threads
 /// @author aevans
 
-use std::thread::{self, Thread};
-
 
 pub trait FnBox {
     fn call_box(self: Box<Self>);
