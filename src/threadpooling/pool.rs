@@ -8,6 +8,7 @@
 /// tasks for parallel execution. In fact, this pool operates on thunks instead of
 ///parallel iterators.
 use std::any::Any;
+use std::cell::Cell;
 use std::collections::hash_map::HashMap;
 use std::sync::mpsc::{self, Sender, Receiver, SendError};
 use std::sync::{Arc, Mutex};
@@ -18,7 +19,14 @@ use crate::transport::thunk;
 use crate::transport::return_value::ReturnValue;
 use crate::transport::messages::{self, Signal, Steal, Terminate};
 use std::time::Duration;
+use core::borrow::BorrowMut;
 
+
+/// A worker struct
+struct Worker{
+    sender: Sender<thunk::Thunk>,
+    thread: Option<JoinHandle<()>>,
+}
 
 /// Threadpool structure for accessing information
 struct ThreadPool {
@@ -41,6 +49,10 @@ impl ThreadPool {
         self.pool_channel.send(thunk)
     }
 
+    fn cancel_threads(){
+
+    }
+
     /// Create a worker which performs tasks
     fn create_worker(thread_id: usize, monitor_sender: Sender<Signal>, backend: Sender<ReturnValue>) -> (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) {
         let (sender, receiver): (Sender<thunk::Thunk>, Receiver<thunk::Thunk>) = mpsc::channel();
@@ -48,7 +60,7 @@ impl ThreadPool {
         let arc_receiver = Arc::new(Mutex::new(receiver));
         let thread_receiver = arc_receiver.clone();
         let thread_signaler = monitor_sender.clone();
-        let handle =thread::spawn(move ||{
+        let mut handle =thread::spawn(move ||{
             let tidx = thread_id.clone();
             let mut run: bool = true;
             while run {
@@ -80,14 +92,21 @@ impl ThreadPool {
     }
 
     /// Creates a worker, encapsulates the run methods
-    fn create_workers(size: usize, backend: Sender<ReturnValue>) -> (HashMap<usize, (JoinHandle<()>, Sender<thunk::Thunk>)>, Vec<Arc<Mutex<Receiver<thunk::Thunk>>>>, Vec<Sender<messages::Signal>>, Receiver<Signal>){
-        let mut worker_map: HashMap<usize, (JoinHandle<()>, Sender<thunk::Thunk>)> = HashMap::<usize, (JoinHandle<()>, Sender<thunk::Thunk>)>::new();
+    fn create_workers(size: usize, backend: Sender<ReturnValue>) -> (HashMap<usize, Worker>, Vec<Arc<Mutex<Receiver<thunk::Thunk>>>>, Vec<Sender<messages::Signal>>, Receiver<Signal>){
+        let mut worker_map: HashMap<usize, Worker> = HashMap::<usize, Worker>::new();
         let mut stealers: Vec<Arc<Mutex<Receiver<thunk::Thunk>>>> = Vec::with_capacity(size);
         let mut signalers: Vec<Sender<messages::Signal>> = Vec::with_capacity(size);
         let (monitor_signaler, monitor_receiver): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
         for i in 0..size {
             let tidx: usize = i.clone();
-            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend.clone());            worker_map.insert(tidx, (handle, sender));
+            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend.clone());
+            let mut cell = Some(handle);
+            let mut witem = Worker{
+                sender: sender.clone(),
+                thread: cell,
+            };
+            worker_map.insert(tidx, witem);
+            signalers.push(signaler);
             stealers.push(receiver);
 
         }
@@ -99,14 +118,17 @@ impl ThreadPool {
         let (backend_sender, backend_receiver): (Sender<ReturnValue>, Receiver<ReturnValue>) = mpsc::channel();
         let thread_backend = backend_sender.clone();
         let master = thread::spawn(move ||{
-            let (workers, stealers, signalers, monitor_receiver) = ThreadPool::create_workers(size, thread_backend.clone());
-            let run: bool = true;
+            let (mut workers, stealers, signalers, monitor_receiver) = ThreadPool::create_workers(size, thread_backend.clone());
+            let mut run: bool = true;
             while run {
                 // check for user signals
                 let sgn_data = master_signaler.try_recv();
                 if sgn_data.is_ok(){
-                    let sgn_data_any = sgn_data.unwrap().as_ref() as &dyn Any;
-
+                    let sgn_rval = sgn_data.unwrap();
+                    let sgn_data_any = sgn_rval.as_ref() as &dyn Any;
+                    if let Some(sgn_data) = sgn_data_any.downcast_ref::<Terminate>(){
+                        run = false;
+                    }
                 }
 
                 // check for thread originated signals
@@ -116,6 +138,15 @@ impl ThreadPool {
                 let data = master_receiver.recv_timeout(d);
                 if data.is_ok(){
 
+                }
+            }
+            // wait for threads to terminate
+            let keys = workers.keys();
+            for i in 0 .. keys.len(){
+                let mut w = workers.get_mut(&i);
+                if w.is_some() {
+                    let mut t = w.unwrap();
+                    t.thread.take().unwrap().join();
                 }
             }
         });
