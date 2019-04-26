@@ -13,7 +13,7 @@ use std::collections::hash_map::HashMap;
 use std::sync::mpsc::{self, Sender, Receiver, SendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::thread::JoinHandle;
+use std::thread::{JoinHandle, current};
 use num_cpus;
 use crate::transport::thunk;
 use crate::transport::return_value::ReturnValue;
@@ -124,7 +124,7 @@ impl ThreadPool {
                 mut signalers,
                 monitor_receiver,
                 monitor_signaler) = ThreadPool::create_workers(nthreads, thread_backend.clone());
-            let current_thread = 0;
+            let mut current_thread = 0;
             let mut run: bool = true;
             while run {
                 // check for user signals
@@ -165,7 +165,21 @@ impl ThreadPool {
                 let d = Duration::new(5, 0);
                 let data = master_receiver.recv_timeout(d);
                 if data.is_ok(){
-
+                    if current_thread >= size{
+                        current_thread = 0;
+                    }
+                    let mut witem: Option<&Worker> = workers.get(&current_thread);
+                    if witem.is_none() {
+                        assert!(current_thread < size);
+                        while witem.is_none() {
+                            current_thread += 1;
+                            witem = workers.get(&current_thread);
+                        }
+                    }else{
+                        current_thread += 1;
+                    }
+                    let fn_box = data.unwrap();
+                    witem.unwrap().sender.send(fn_box);
                 }
             }
             // wait for threads to terminate
