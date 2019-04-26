@@ -1,7 +1,6 @@
 /// A thunk capable of sharing routines between threads
 /// @author aevans
 
-
 pub trait FnBox {
     fn call_box(self: Box<Self>);
 }
@@ -21,7 +20,7 @@ pub type Thunk = Box<dyn FnBox + Send>;
 mod tests {
 
     use super::*;
-    use std::thread::Thread;
+    use std::thread::{self, Thread};
 
     fn execute(b: bool) {
         assert!(true);
