@@ -7,10 +7,11 @@
 /// There is no based on work-load at runtime. This pool does not break down large
 /// tasks for parallel execution. In fact, this pool operates on thunks instead of
 ///parallel iterators.
+use crate::transport::return_value;
 use std::any::Any;
 use std::cell::Cell;
 use std::collections::hash_map::HashMap;
-use std::sync::mpsc::{self, Sender, Receiver, SendError};
+use std::sync::mpsc::{self, Sender, Receiver, SendError, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{JoinHandle, current};
@@ -20,46 +21,48 @@ use crate::transport::return_value::ReturnValue;
 use crate::transport::messages::{self, Signal, Steal, Terminate, Terminated};
 use std::time::Duration;
 use core::borrow::{BorrowMut, Borrow};
+use crate::transport::thunk::FnBoxGeneric;
 
 
 /// A worker struct
-struct Worker{
-    sender: Sender<thunk::Thunk>,
+struct Worker<V>{
+    sender: Sender<thunk::ReturnableThunk<V>>,
     thread: Option<JoinHandle<()>>,
 }
 
+
 /// Threadpool structure for accessing information
-struct ThreadPool {
+struct ThreadPool<V> {
     size: usize,
-    pool_channel: mpsc::Sender<thunk::Thunk>,
+    pool_channel: mpsc::Sender<thunk::ReturnableThunk<V>>,
     pool_signal: mpsc::Sender<messages::Signal>,
 }
 
 
 /// Thread pool implementation
-impl ThreadPool {
+impl <V: 'static> ThreadPool<V> {
 
     /// shuts down the pool gracefully
-    fn shutdown(self){
+    fn shutdown(&self){
         let t: Terminate = Terminate{};
         let rm: Signal = Box::new(t);
         self.pool_signal.send(rm);
     }
 
     /// Submit a task onto the pool. Returns the submission result.
-    fn submit(self, thunk: thunk::Thunk) -> Result<(), SendError<thunk::Thunk>> {
+    fn submit(&self, thunk: thunk::ReturnableThunk<V>) -> Result<(), SendError<thunk::ReturnableThunk<V>>> {
         self.pool_channel.send(thunk)
     }
 
 
     /// Create a worker which performs tasks
-    fn create_worker(thread_id: usize, monitor_sender: Sender<Signal>, backend: Sender<ReturnValue>) -> (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) {
-        let (sender, receiver): (Sender<thunk::Thunk>, Receiver<thunk::Thunk>) = mpsc::channel();
+    fn create_worker(thread_id: usize, monitor_sender: Sender<Signal>, backend: Sender<ReturnValue>) -> (JoinHandle<()>, Sender<thunk::ReturnableThunk<V>>, Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>, Sender<messages::Signal>) {
+        let (sender, receiver): (Sender<thunk::ReturnableThunk<V>>, Receiver<thunk::ReturnableThunk<V>>) = mpsc::channel();
         let (sgn_sender, sgn_receiver): (Sender<messages::Signal>, Receiver<messages::Signal>) = mpsc::channel();
         let arc_receiver = Arc::new(Mutex::new(receiver));
         let thread_receiver = arc_receiver.clone();
         let thread_signaler = monitor_sender.clone();
-        let mut handle =thread::spawn(move ||{
+        let mut handle = thread::spawn(move ||{
             let tidx = thread_id.clone();
             let mut run: bool = true;
             while run {
@@ -76,7 +79,16 @@ impl ThreadPool {
                     let data = thread_receiver.lock().unwrap().recv_timeout(duration);
                     if data.is_ok() {
                         let rdata = data.unwrap();
-                        rdata.call_box();
+                        let d = rdata.call_box().unwrap();
+                        let data_any = (&d) as &dyn Any;
+                        if let Some(d) = data_any.downcast_ref::<i64>(){
+                            let mstrct = return_value::ReturnMessage::<i64>{
+                                success: true,
+                                message: *d,
+                            };
+                            let rval: ReturnValue = Box::new(mstrct);
+                            monitor_sender.send(rval);
+                        }
                     }else if data.is_err(){
                         let m = Steal{
                           thread_id: tidx,
@@ -91,14 +103,14 @@ impl ThreadPool {
     }
 
     /// Creates a worker, encapsulates the run methods
-    fn create_workers(size: usize, backend: Sender<ReturnValue>) -> (HashMap<usize, Worker>, Vec<Arc<Mutex<Receiver<thunk::Thunk>>>>, Vec<Sender<messages::Signal>>, Receiver<Signal>, Sender<Signal>){
-        let mut worker_map: HashMap<usize, Worker> = HashMap::<usize, Worker>::new();
-        let mut stealers: Vec<Arc<Mutex<Receiver<thunk::Thunk>>>> = Vec::with_capacity(size.clone());
+    fn create_workers(size: usize, backend: Sender<ReturnValue>) -> (HashMap<usize, Worker<V>>, Vec<Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>>, Vec<Sender<messages::Signal>>, Receiver<Signal>, Sender<Signal>){
+        let mut worker_map: HashMap<usize, Worker<V>> = HashMap::<usize, Worker<V>>::new();
+        let mut stealers: Vec<Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>> = Vec::with_capacity(size.clone());
         let mut signalers: Vec<Sender<messages::Signal>> = Vec::with_capacity(size);
         let (monitor_signaler, monitor_receiver): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
         for i in 0..size {
             let tidx: usize = i.clone();
-            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend.clone());
+            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::ReturnableThunk<V>>, Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend.clone());
             let mut cell = Some(handle);
             let mut witem = Worker{
                 sender: sender.clone(),
@@ -113,7 +125,7 @@ impl ThreadPool {
     }
 
     /// Run the master thread which maintains workers and monitors threads.
-    fn run_master(size: usize, master_receiver: Receiver<thunk::Thunk>, master_signaler: Receiver<messages::Signal>) -> (JoinHandle<()>, Receiver<ReturnValue>){
+    fn run_master(size: usize, master_receiver: Receiver<thunk::ReturnableThunk<V>>, master_signaler: Receiver<messages::Signal>) -> (JoinHandle<()>, Receiver<ReturnValue>){
         let (backend_sender, backend_receiver): (Sender<ReturnValue>, Receiver<ReturnValue>) = mpsc::channel();
         let thread_backend = backend_sender.clone();
 
@@ -146,7 +158,7 @@ impl ThreadPool {
                         Some(m) => {
                             let tidx = m.thread_id.clone();
                             workers.remove(&tidx);
-                            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::Thunk>, Arc<Mutex<Receiver<thunk::Thunk>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend_sender.clone());
+                            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::ReturnableThunk<V>>, Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend_sender.clone());
                             let mut cell = Some(handle);
                             let mut witem = Worker{
                                 sender: sender.clone(),
@@ -168,7 +180,7 @@ impl ThreadPool {
                     if current_thread >= size{
                         current_thread = 0;
                     }
-                    let mut witem: Option<&Worker> = workers.get(&current_thread);
+                    let mut witem: Option<&Worker<V>> = workers.get(&current_thread);
                     if witem.is_none() {
                         assert!(current_thread < size);
                         while witem.is_none() {
@@ -196,8 +208,8 @@ impl ThreadPool {
     }
 
     /// Run the threadpool. Returns the thread handle for the pool.
-    fn run(size: usize) -> (JoinHandle<()>, ThreadPool, Receiver<ReturnValue>) {
-        let (master_sender, master_receiver): (Sender<thunk::Thunk>, Receiver<thunk::Thunk>) = mpsc::channel();
+    fn run(size: usize) -> (JoinHandle<()>, ThreadPool<V>, Receiver<ReturnValue>) {
+        let (master_sender, master_receiver): (Sender<thunk::ReturnableThunk<V>>, Receiver<thunk::ReturnableThunk<V>>) = mpsc::channel();
         let (master_signal, master_signal_receiver): (Sender<messages::Signal>, Receiver<messages::Signal>) = mpsc::channel();
         let pool_channel = master_sender.clone();
         let (master, backend) = ThreadPool::run_master(size.clone(), master_receiver, master_signal_receiver);
@@ -210,7 +222,7 @@ impl ThreadPool {
     }
 
     /// Create a new threadpool of the specified size
-    fn new(size: usize) -> (JoinHandle<()>, ThreadPool, Receiver<ReturnValue>) {
+    fn new(size: usize) -> (JoinHandle<()>, ThreadPool<V>, Receiver<ReturnValue>) {
         assert!(size > 0);
         let core_count = num_cpus::get();
         assert!(size <= core_count * 100);
@@ -223,10 +235,32 @@ impl ThreadPool {
 mod tests {
 
     use super::*;
+    use crate::transport::thunk::ReturnableThunk;
+    use std::thread::JoinHandle;
 
 
     #[test]
     fn test_should_create_pool(){
-        let p = ThreadPool::new(3);
+        let (jh, tp, receiver) = ThreadPool::<i64>::new(3);
     }
+
+    #[test]
+    fn test_pool_should_close(){
+        let (jh, tp, receiver) = ThreadPool::<i64>::new(3);
+        tp.shutdown();
+    }
+
+    #[test]
+    fn test_pool_should_run_thunk(){
+        let thunk: ReturnableThunk<i64> = Box::new(|| 1 + 1);
+        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
+        assert!(tp.submit(thunk).is_ok());
+        let d = Duration::new(5, 0);
+        let data = receiver.recv_timeout(d);
+        tp.shutdown();
+        assert!(data.is_ok());
+    }
+
+    #[test]
+    fn test_pool_should_run_many_thunks(){}
 }

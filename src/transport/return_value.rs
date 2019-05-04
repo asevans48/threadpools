@@ -2,6 +2,10 @@
 
 use std::any::Any;
 
+pub struct ReturnMessage<V>{
+    pub success: bool,
+    pub message: V,
+}
 
 pub type ReturnValue = Box<Any + Send>;
 
