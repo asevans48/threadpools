@@ -8,8 +8,10 @@
 /// tasks for parallel execution. In fact, this pool operates on thunks instead of
 ///parallel iterators.
 use crate::transport::return_value;
+use rand::prelude::*;
 use std::any::Any;
 use std::cell::Cell;
+use std::char;
 use std::collections::hash_map::HashMap;
 use std::sync::mpsc::{self, Sender, Receiver, SendError, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -73,9 +75,10 @@ impl <V: 'static> ThreadPool<V> {
                     if let Some(sgn_data) = sgn_data_any.downcast_ref::<Terminate>(){
                         run = false;
                     }
+
                 }
                 if run {
-                    let duration = Duration::new(15, 0);
+                    let duration = Duration::new(0, 10);
                     let data = thread_receiver.lock().unwrap().recv_timeout(duration);
                     if data.is_ok() {
                         let rdata = data.unwrap();
@@ -154,7 +157,7 @@ impl <V: 'static> ThreadPool<V> {
                 if thread_data.is_ok() {
                     let udata = thread_data.unwrap();
                     let val_any = udata.as_ref() as &dyn Any;
-                    //implement handlers from the thread
+                    //implement handler for termination
                     match val_any.downcast_ref::<Box<Terminated>>() {
                         Some(m) => {
                             let tidx = m.thread_id.clone();
@@ -168,7 +171,35 @@ impl <V: 'static> ThreadPool<V> {
                             workers.insert(tidx, witem);
                         }
                         None => {
+                            //implement handler for work stealing
+                            match val_any.downcast_ref::<Box<Steal>>() {
+                                Some(m) => {
+                                    let tidx: usize  = m.thread_id.clone();
+                                    let mut found = false;
+                                    let mut i = 0;
+                                    // look for work through the loop, send and stop
+                                    while found == false && i < stealers.len(){
+                                        if i != tidx {
+                                            let qResult = stealers[i].lock().unwrap();
+                                            let m = qResult.try_recv();
+                                            if m.is_ok(){
+                                                match workers.get_mut(&tidx){
+                                                    Some(w) =>{
+                                                        w.sender.send(m.unwrap());
+                                                    }
+                                                    None =>{
 
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        i += 1
+                                    }
+                                }
+                                None => {
+
+                                }
+                            }
                         }
                     }
                 }
@@ -238,6 +269,7 @@ mod tests {
     use super::*;
     use crate::transport::thunk::ReturnableThunk;
     use std::thread::JoinHandle;
+    use crate::transport::return_value::ReturnMessage;
 
 
     #[test]
@@ -257,23 +289,51 @@ mod tests {
         let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
         assert!(tp.submit(thunk).is_ok());
         let d = Duration::new(5, 0);
-        let data = receiver.recv_timeout(d);
         tp.shutdown();
+        let data = receiver.recv_timeout(d);
         assert!(data.is_ok());
+        let v = data.unwrap();
+        let v_any = v.as_ref() as &dyn Any;
+        if let Some(v) =  v_any.downcast_ref::<ReturnMessage<i64>>(){
+            let vo: &ReturnMessage<i64> =  v_any.downcast_ref::<ReturnMessage<i64>>().unwrap();
+            assert!(vo.message == 2);
+        }else{
+            assert!(false);
+        }
+
     }
 
     #[test]
     fn test_pool_should_run_many_thunks(){
-        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
-        for i in 0..100 {
-            let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {1 + 1});
+        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(10);
+        for i in 0..1000000  {
+            let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {
+                let mut s: String = "Hello ".to_string();
+                s.push_str("World");
+                let mut rng = rand::thread_rng();
+                let endF: f64 = rng.gen();
+                let endVal= ((endF * 1000.0) as i64);
+                if(endF < 0.5) {
+                    for i in 0..endVal {
+                        s.push_str(i.to_string().as_str());
+                    }
+                }
+                1 + 1
+            });
             assert!(tp.submit(thunk).is_ok());
         }
         let d = Duration::new(5, 0);
-        for i in 0..100 {
-            println!("{}", i);
+        for i in 0..1000000 {
             let data = receiver.recv_timeout(d);
             assert!(data.is_ok());
+            let v = data.unwrap();
+            let v_any = v.as_ref() as &dyn Any;
+            if let Some(v) =  v_any.downcast_ref::<ReturnMessage<i64>>(){
+                let vo: &ReturnMessage<i64> =  v_any.downcast_ref::<ReturnMessage<i64>>().unwrap();
+                assert!(vo.message == 2);
+            }else{
+                assert!(false);
+            }
         }
         tp.shutdown();
     }
