@@ -87,7 +87,7 @@ impl <V: 'static> ThreadPool<V> {
                                 message: *d,
                             };
                             let rval: ReturnValue = Box::new(mstrct);
-                            monitor_sender.send(rval);
+                            backend.send(rval);
                         }
                     }else if data.is_err(){
                         let m = Steal{
@@ -154,13 +154,14 @@ impl <V: 'static> ThreadPool<V> {
                 if thread_data.is_ok() {
                     let udata = thread_data.unwrap();
                     let val_any = udata.as_ref() as &dyn Any;
-                    match val_any.downcast_ref::<Box<Terminated>>(){
+                    //implement handlers from the thread
+                    match val_any.downcast_ref::<Box<Terminated>>() {
                         Some(m) => {
                             let tidx = m.thread_id.clone();
                             workers.remove(&tidx);
-                            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::ReturnableThunk<V>>, Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(),backend_sender.clone());
+                            let (handle, sender, receiver, signaler): (JoinHandle<()>, Sender<thunk::ReturnableThunk<V>>, Arc<Mutex<Receiver<thunk::ReturnableThunk<V>>>>, Sender<messages::Signal>) = ThreadPool::create_worker(tidx, monitor_signaler.clone(), backend_sender.clone());
                             let mut cell = Some(handle);
-                            let mut witem = Worker{
+                            let mut witem = Worker {
                                 sender: sender.clone(),
                                 thread: cell,
                             };
@@ -252,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_pool_should_run_thunk(){
-        let thunk: ReturnableThunk<i64> = Box::new(|| 1 + 1);
+        let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {1 + 1});
         let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
         assert!(tp.submit(thunk).is_ok());
         let d = Duration::new(5, 0);
@@ -262,5 +263,18 @@ mod tests {
     }
 
     #[test]
-    fn test_pool_should_run_many_thunks(){}
+    fn test_pool_should_run_many_thunks(){
+        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
+        for i in 0..100 {
+            let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {1 + 1});
+            assert!(tp.submit(thunk).is_ok());
+        }
+        let d = Duration::new(5, 0);
+        for i in 0..100 {
+            println!("{}", i);
+            let data = receiver.recv_timeout(d);
+            assert!(data.is_ok());
+        }
+        tp.shutdown();
+    }
 }
