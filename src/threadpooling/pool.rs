@@ -7,6 +7,7 @@
 /// There is no based on work-load at runtime. This pool does not break down large
 /// tasks for parallel execution. In fact, this pool operates on thunks instead of
 ///parallel iterators.
+
 use crate::transport::return_value;
 use rand::prelude::*;
 use std::any::Any;
@@ -34,7 +35,7 @@ struct Worker<V>{
 
 
 /// Threadpool structure for accessing information
-struct ThreadPool<V> {
+pub struct ThreadPool<V> {
     size: usize,
     pool_channel: mpsc::Sender<thunk::ReturnableThunk<V>>,
     pool_signal: mpsc::Sender<messages::Signal>,
@@ -45,14 +46,14 @@ struct ThreadPool<V> {
 impl <V: 'static> ThreadPool<V> {
 
     /// shuts down the pool gracefully
-    fn shutdown(&self){
+    pub fn shutdown(&self){
         let t: Terminate = Terminate{};
         let rm: Signal = Box::new(t);
         self.pool_signal.send(rm);
     }
 
     /// Submit a task onto the pool. Returns the submission result.
-    fn submit(&self, thunk: thunk::ReturnableThunk<V>) -> Result<(), SendError<thunk::ReturnableThunk<V>>> {
+    pub fn submit(&self, thunk: thunk::ReturnableThunk<V>) -> Result<(), SendError<thunk::ReturnableThunk<V>>> {
         self.pool_channel.send(thunk)
     }
 
@@ -68,6 +69,7 @@ impl <V: 'static> ThreadPool<V> {
             let tidx = thread_id.clone();
             let mut run: bool = true;
             while run {
+                let duration = Duration::new(0, 10);
                 let sgn_data = sgn_receiver.try_recv();
                 if sgn_data.is_ok() {
                     let sgn_rval = sgn_data.unwrap();
@@ -75,11 +77,11 @@ impl <V: 'static> ThreadPool<V> {
                     if let Some(sgn_data) = sgn_data_any.downcast_ref::<Terminate>(){
                         run = false;
                     }
-
                 }
                 if run {
-                    let duration = Duration::new(0, 10);
-                    let data = thread_receiver.lock().unwrap().recv_timeout(duration);
+                    let gaurd = thread_receiver.lock().unwrap();
+                    let data = gaurd.recv_timeout(duration);
+                    drop(gaurd);
                     if data.is_ok() {
                         let rdata = data.unwrap();
                         let d = rdata.call_box().unwrap();
@@ -98,6 +100,7 @@ impl <V: 'static> ThreadPool<V> {
                         };
                         let sval: Signal = Box::new(m);
                         thread_signaler.send(sval);
+                        thread::sleep(duration);
                     }
                 }
             }
@@ -206,7 +209,7 @@ impl <V: 'static> ThreadPool<V> {
 
 
                 // handle incoming data
-                let d = Duration::new(5, 0);
+                let d = Duration::new(0, 1000);
                 let data = master_receiver.recv_timeout(d);
                 if data.is_ok(){
                     if current_thread >= size{
@@ -254,7 +257,7 @@ impl <V: 'static> ThreadPool<V> {
     }
 
     /// Create a new threadpool of the specified size
-    fn new(size: usize) -> (JoinHandle<()>, ThreadPool<V>, Receiver<ReturnValue>) {
+    pub fn new(size: usize) -> (JoinHandle<()>, ThreadPool<V>, Receiver<ReturnValue>) {
         assert!(size > 0);
         let core_count = num_cpus::get();
         assert!(size <= core_count * 100);
@@ -305,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_pool_should_run_many_thunks(){
-        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(10);
+        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
         for i in 0..1000000  {
             let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {
                 let mut s: String = "Hello ".to_string();
@@ -323,7 +326,7 @@ mod tests {
             assert!(tp.submit(thunk).is_ok());
         }
         let d = Duration::new(5, 0);
-        for i in 0..1000000 {
+        for i in 0..1000000{
             let data = receiver.recv_timeout(d);
             assert!(data.is_ok());
             let v = data.unwrap();
