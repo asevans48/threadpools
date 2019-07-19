@@ -185,6 +185,7 @@ impl <V: 'static> ThreadPool<V> {
                                         if i != tidx {
                                             let qResult = stealers[i].lock().unwrap();
                                             let m = qResult.try_recv();
+                                            drop(qResult);
                                             if m.is_ok(){
                                                 match workers.get_mut(&tidx){
                                                     Some(w) =>{
@@ -308,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_pool_should_run_many_thunks(){
-        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(3);
+        let (jh, mut tp, receiver) = ThreadPool::<i64>::new(4);
         for i in 0..1000000  {
             let thunk: ReturnableThunk<i64> = Box::new(|| -> i64 {
                 let mut s: String = "Hello ".to_string();
